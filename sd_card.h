@@ -83,3 +83,37 @@ void initializeSDCard() {
   Serial.println();
   Serial.println("[SD] File listing complete");
 }
+
+
+void loadSongList() {
+  songList.clear();
+
+  if (!sdReady) return;
+
+  File dir = SD.open("/MUSIC");
+  if (!dir) return;
+
+  while (true) {
+    File entry = dir.openNextFile();
+    if (!entry) break;
+
+    if (!entry.isDirectory()) {
+      String name      = entry.name();
+      String nameLower = name;
+      nameLower.toLowerCase();
+
+      if (!name.startsWith("._") &&
+          (nameLower.endsWith(".mid") || nameLower.endsWith(".midi"))) {
+        songList.push_back(name);
+      }
+    }
+
+    entry.close();
+  }
+
+  dir.close();
+
+  Serial.print("[SD] Song list loaded: ");
+  Serial.print(songList.size());
+  Serial.println(" songs");
+}

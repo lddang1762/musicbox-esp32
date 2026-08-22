@@ -10,6 +10,81 @@
 
 
 // ============================================================
+// WEBSOCKET
+// ============================================================
+
+AsyncWebSocket ws("/ws");
+
+
+// ============================================================
+// STATUS JSON (shared by HTTP and WebSocket)
+// ============================================================
+
+String buildStatusJson() {
+  String json;
+  json.reserve(256);
+
+  json += "{";
+  json += "\"powerOn\":";
+  json += musicBoxPower ? "true" : "false";
+  json += ",\"filename\":\"";
+
+  for (size_t i = 0; i < filename.length(); i++) {
+    char c = filename[i];
+    switch (c) {
+      case '"':  json += "\\\""; break;
+      case '\\': json += "\\\\"; break;
+      case '\n': json += "\\n";  break;
+      case '\r': json += "\\r";  break;
+      case '\t': json += "\\t";  break;
+      default:   json += c;      break;
+    }
+  }
+
+  json += "\"";
+  json += ",\"progress\":";
+  json += String(progress, 3);
+  json += ",\"playing\":";
+  json += isPlaying ? "true" : "false";
+  json += ",\"hasSong\":";
+  json += hasSong ? "true" : "false";
+  json += ",\"songIndex\":";
+  json += String(songIndex);
+  json += ",\"wifi\":";
+  json += WiFi.status() == WL_CONNECTED ? "true" : "false";
+  json += "}";
+
+  return json;
+}
+
+
+// Broadcast current state to all connected WebSocket clients.
+// Call after any state change regardless of trigger source.
+
+void broadcastStatus() {
+  if (ws.count() == 0) return;
+  ws.textAll(buildStatusJson());
+}
+
+
+// ============================================================
+// WEBSOCKET EVENT HANDLER
+// ============================================================
+
+void onWsEvent(AsyncWebSocket*       server,
+               AsyncWebSocketClient* client,
+               AwsEventType          type,
+               void*                 arg,
+               uint8_t*              data,
+               size_t                len) {
+  if (type == WS_EVT_CONNECT) {
+    // Send full state immediately so the new client syncs without polling.
+    client->text(buildStatusJson());
+  }
+}
+
+
+// ============================================================
 // MIME TYPE
 // ============================================================
 
@@ -44,25 +119,6 @@ bool littleFSFileExists(const String& path) {
   bool valid = !file.isDirectory();
   file.close();
   return valid;
-}
-
-
-// ============================================================
-// JSON HELPERS
-// ============================================================
-
-void appendJsonEscaped(String& output, const String& input) {
-  for (size_t i = 0; i < input.length(); i++) {
-    char c = input[i];
-    switch (c) {
-      case '"':  output += "\\\""; break;
-      case '\\': output += "\\\\"; break;
-      case '\n': output += "\\n";  break;
-      case '\r': output += "\\r";  break;
-      case '\t': output += "\\t";  break;
-      default:   output += c;      break;
-    }
-  }
 }
 
 
@@ -156,29 +212,8 @@ void handleStaticFile(AsyncWebServerRequest* request) {
 // ============================================================
 
 void handleStatus(AsyncWebServerRequest* request) {
-  String json;
-  json.reserve(512);
-
-  json += "{";
-  json += "\"powerOn\":";
-  json += musicBoxPower ? "true" : "false";
-  json += ",\"filename\":\"";
-  appendJsonEscaped(json, filename);
-  json += "\"";
-  json += ",\"progress\":";
-  json += String(progress, 3);
-  json += ",\"playing\":";
-  json += isPlaying ? "true" : "false";
-  json += ",\"hasSong\":";
-  json += hasSong ? "true" : "false";
-  json += ",\"songIndex\":";
-  json += String(songIndex);
-  json += ",\"wifi\":";
-  json += WiFi.status() == WL_CONNECTED ? "true" : "false";
-  json += "}";
-
   AsyncWebServerResponse* response =
-    request->beginResponse(200, "application/json", json);
+    request->beginResponse(200, "application/json", buildStatusJson());
 
   if (!response) {
     request->send(500);
@@ -193,6 +228,7 @@ void handleStatus(AsyncWebServerRequest* request) {
 
 void handlePowerOn(AsyncWebServerRequest* request) {
   setMusicBoxPower(true);
+  broadcastStatus();
 
   AsyncWebServerResponse* response =
     request->beginResponse(200, "application/json", "{\"powerOn\":true}");
@@ -204,6 +240,7 @@ void handlePowerOn(AsyncWebServerRequest* request) {
 
 void handlePowerOff(AsyncWebServerRequest* request) {
   setMusicBoxPower(false);
+  broadcastStatus();
 
   AsyncWebServerResponse* response =
     request->beginResponse(200, "application/json", "{\"powerOn\":false}");
@@ -228,6 +265,8 @@ void handleSelect(AsyncWebServerRequest* request) {
     songIndex = request->getParam("index")->value().toInt();
   }
 
+  broadcastStatus();
+
   AsyncWebServerResponse* response =
     request->beginResponse(200, "application/json", "{\"ok\":true}");
 
@@ -242,6 +281,8 @@ void handlePlay(AsyncWebServerRequest* request) {
     lastProgressTime = millis();
   }
 
+  broadcastStatus();
+
   AsyncWebServerResponse* response =
     request->beginResponse(200, "application/json", "{\"ok\":true}");
 
@@ -252,6 +293,7 @@ void handlePlay(AsyncWebServerRequest* request) {
 
 void handlePause(AsyncWebServerRequest* request) {
   isPlaying = false;
+  broadcastStatus();
 
   AsyncWebServerResponse* response =
     request->beginResponse(200, "application/json", "{\"ok\":true}");
@@ -268,6 +310,7 @@ void handleStop(AsyncWebServerRequest* request) {
   filename  = "";
   progress  = 0.0f;
   resetFilenameScroll();
+  broadcastStatus();
 
   AsyncWebServerResponse* response =
     request->beginResponse(200, "application/json", "{\"ok\":true}");
@@ -301,7 +344,11 @@ void handleSongs(AsyncWebServerRequest* request) {
               (nameLower.endsWith(".mid") || nameLower.endsWith(".midi"))) {
             if (!first) json += ",";
             json += "\"";
-            appendJsonEscaped(json, name);
+            for (size_t i = 0; i < name.length(); i++) {
+              char c = name[i];
+              if (c == '"' || c == '\\') json += '\\';
+              json += c;
+            }
             json += "\"";
             first = false;
           }
@@ -334,6 +381,9 @@ void handleTest(AsyncWebServerRequest* request) {
 // ============================================================
 
 void setupWebServer() {
+  ws.onEvent(onWsEvent);
+  server.addHandler(&ws);
+
   server.on("/api/status",    HTTP_GET,  handleStatus);
   server.on("/api/power/on",  HTTP_POST, handlePowerOn);
   server.on("/api/power/off", HTTP_POST, handlePowerOff);
@@ -348,4 +398,5 @@ void setupWebServer() {
 
   server.begin();
   Serial.println("[HTTP] Async server started");
+  Serial.println("[WS]   WebSocket listening on /ws");
 }

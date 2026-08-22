@@ -97,6 +97,7 @@
 #include "wifi_manager.h"
 #include "sd_card.h"
 #include "web_server.h"
+#include "buttons.h"
 
 
 // ============================================================
@@ -180,6 +181,14 @@ void setup() {
   // ==========================================================
 
   initializeSDCard();
+  loadSongList();
+
+
+  // ==========================================================
+  // BUTTONS
+  // ==========================================================
+
+  setupButtons();
 
 
   // ==========================================================
@@ -226,6 +235,8 @@ void loop() {
   unsigned long now = millis();
 
   maintainWiFi();
+  ws.cleanupClients();
+  updateButtons(now);
   updateFilenameScroll(now);
   updateProgress(now);
 

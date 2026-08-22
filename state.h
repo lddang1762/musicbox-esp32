@@ -1,5 +1,6 @@
 #pragma once
 
+#include <vector>
 #include <Adafruit_SSD1306.h>
 #include <ESPAsyncWebServer.h>
 
@@ -97,3 +98,10 @@ bool littleFSReady = false;
 // ============================================================
 
 bool sdReady = false;
+
+
+// ============================================================
+// SONG LIST (for physical button navigation)
+// ============================================================
+
+std::vector<String> songList;
