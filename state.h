@@ -77,13 +77,39 @@ unsigned long lastDisplayTime = 0;
 
 
 // ============================================================
+// DISPLAY MODE
+// ============================================================
+
+enum DisplayMode { DISPLAY_SONG_SELECT, DISPLAY_NOW_PLAYING, DISPLAY_TRANSITIONING };
+
+DisplayMode  displayMode     = DISPLAY_SONG_SELECT;
+int          selectCursor    = 0;   // highlighted row in song select
+int          selectScrollTop = 0;   // first visible row in song select
+const char*  transitionText  = "";  // message shown in DISPLAY_TRANSITIONING
+
+
+// ============================================================
+// POWER TRANSITION
+// ============================================================
+
+// Web-triggered power transitions use a non-blocking timer so the async
+// TCP task is never stalled. The main loop applies the state change after
+// POWER_TRANSITION_MS and broadcasts the result over WebSocket.
+
+enum PowerTransitionState { PWR_IDLE, PWR_TURNING_ON, PWR_TURNING_OFF };
+
+PowerTransitionState pendingPowerTransition = PWR_IDLE;
+
+
+// ============================================================
 // WIFI
 // ============================================================
 
 enum WifiState { WIFI_DISCONNECTED, WIFI_CONNECTING, WIFI_CONNECTED };
 
-volatile WifiState wifiState          = WIFI_DISCONNECTED;
+volatile WifiState wifiState            = WIFI_DISCONNECTED;
 unsigned long      lastReconnectAttempt = 0;
+int                wifiReconnectAttempts = 0;
 
 
 // ============================================================

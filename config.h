@@ -35,6 +35,9 @@ const char* HOSTNAME      = "musicbox";
 
 #define SD_CS 5
 
+#define SD_INIT_RETRIES        5
+#define SD_INIT_RETRY_DELAY_MS 500
+
 
 // ============================================================
 // BUTTONS
@@ -59,3 +62,8 @@ const unsigned long END_PAUSE_MS                = 1500;
 const unsigned long PROGRESS_INTERVAL_MS        = 100;
 const unsigned long DISPLAY_INTERVAL_MS         = 100;
 const unsigned long RECONNECT_INTERVAL_MS       = 5000;
+
+// After this many consecutive failed reconnect attempts, do a full
+// WiFi stack reset (WiFi.disconnect + WiFi.begin) instead of just
+// WiFi.reconnect(), which can get permanently stuck after long uptimes.
+const int WIFI_RECONNECT_MAX_ATTEMPTS = 10;

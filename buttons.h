@@ -35,42 +35,8 @@ static const int BTN_COUNT = sizeof(buttons) / sizeof(buttons[0]);
 
 
 // ============================================================
-// BUTTON ACTIONS
+// INTERNAL HELPERS
 // ============================================================
-
-void pressPower() {
-  setMusicBoxPower(!musicBoxPower);
-  broadcastStatus();
-}
-
-
-void pressPlayPause() {
-  if (!musicBoxPower) return;
-  if (!hasSong)       return;
-
-  if (isPlaying) {
-    isPlaying = false;
-  } else {
-    isPlaying        = true;
-    lastProgressTime = millis();
-  }
-
-  broadcastStatus();
-}
-
-
-void pressStop() {
-  if (!musicBoxPower) return;
-
-  isPlaying = false;
-  hasSong   = false;
-  songIndex = -1;
-  filename  = "";
-  progress  = 0.0f;
-  resetFilenameScroll();
-  broadcastStatus();
-}
-
 
 static void selectSong(int index) {
   if (songList.empty()) return;
@@ -86,27 +52,108 @@ static void selectSong(int index) {
 }
 
 
+// ============================================================
+// BUTTON ACTIONS
+// ============================================================
+
+void pressPower() {
+  if (pendingPowerTransition != PWR_IDLE) return;
+
+  bool newPower = !musicBoxPower;
+
+  // Flag the transition before broadcasting so all connected webapp clients
+  // receive transitioning:true and show "Powering on/off..." immediately.
+  // The async TCP task delivers the WS message during delay() even though
+  // the main loop is blocked.
+  pendingPowerTransition = newPower ? PWR_TURNING_ON : PWR_TURNING_OFF;
+
+  drawPowerTransition(newPower ? "Powering on..." : "Powering off...");
+  broadcastStatus();
+  delay(2000);
+
+  // Clear before setMusicBoxPower so updatePowerTransition() on the next
+  // loop tick doesn't race and apply the change a second time.
+  pendingPowerTransition = PWR_IDLE;
+  setMusicBoxPower(newPower);
+  broadcastStatus();
+}
+
+
+void pressPlayPause() {
+  if (!musicBoxPower) return;
+
+  if (displayMode == DISPLAY_SONG_SELECT) {
+    // Play the currently highlighted song and switch to now-playing view.
+    if (songList.empty()) return;
+    selectSong(selectCursor);
+    displayMode = DISPLAY_NOW_PLAYING;
+    broadcastStatus();
+    return;
+  }
+
+  // DISPLAY_NOW_PLAYING: toggle play / pause.
+  if (!hasSong) return;
+
+  if (isPlaying) {
+    isPlaying = false;
+  } else {
+    isPlaying        = true;
+    lastProgressTime = millis();
+  }
+  broadcastStatus();
+}
+
+
+void pressStop() {
+  if (!musicBoxPower) return;
+
+  if (displayMode == DISPLAY_NOW_PLAYING) {
+    // Return to song select; keep cursor on the song we were playing.
+    selectCursor    = (songIndex >= 0) ? songIndex : 0;
+    isPlaying       = false;
+    hasSong         = false;
+    filename        = "";
+    progress        = 0.0f;
+    songIndex       = -1;
+    displayMode     = DISPLAY_SONG_SELECT;
+    resetFilenameScroll();
+    broadcastStatus();
+  }
+  // Nothing to do when already in DISPLAY_SONG_SELECT.
+}
+
+
 void pressNext() {
-  if (!musicBoxPower) setMusicBoxPower(true);
+  if (!musicBoxPower) return;
+
+  if (displayMode == DISPLAY_SONG_SELECT) {
+    // Move cursor down (wraps).
+    if (songList.empty()) return;
+    selectCursor = (selectCursor + 1) % (int)songList.size();
+    return;  // Cursor movement is local — no WS broadcast needed.
+  }
+
+  // DISPLAY_NOW_PLAYING: skip to next song.
   if (songList.empty()) return;
-
-  int next = (songIndex < 0)
-    ? 0
-    : (songIndex + 1) % (int)songList.size();
-
+  int next = (songIndex < 0) ? 0 : (songIndex + 1) % (int)songList.size();
   selectSong(next);
   broadcastStatus();
 }
 
 
 void pressPrev() {
-  if (!musicBoxPower) setMusicBoxPower(true);
+  if (!musicBoxPower) return;
+
+  if (displayMode == DISPLAY_SONG_SELECT) {
+    // Move cursor up (wraps).
+    if (songList.empty()) return;
+    selectCursor = (selectCursor - 1 + (int)songList.size()) % (int)songList.size();
+    return;  // Cursor movement is local — no WS broadcast needed.
+  }
+
+  // DISPLAY_NOW_PLAYING: skip to previous song.
   if (songList.empty()) return;
-
-  int prev = (songIndex <= 0)
-    ? (int)songList.size() - 1
-    : songIndex - 1;
-
+  int prev = (songIndex <= 0) ? (int)songList.size() - 1 : songIndex - 1;
   selectSong(prev);
   broadcastStatus();
 }

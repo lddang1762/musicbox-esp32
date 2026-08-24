@@ -30,11 +30,13 @@ void WiFiEvent(WiFiEvent_t event) {
       break;
 
     case ARDUINO_EVENT_WIFI_STA_CONNECTED:
+      wifiReconnectAttempts = 0;
       Serial.println("[WiFi] Connected to AP");
       break;
 
     case ARDUINO_EVENT_WIFI_STA_GOT_IP:
-      wifiState = WIFI_CONNECTED;
+      wifiState             = WIFI_CONNECTED;
+      wifiReconnectAttempts = 0;
       Serial.println();
       Serial.println("[WiFi] GOT IP");
       Serial.print("[WiFi] IP: ");
@@ -62,7 +64,10 @@ void beginWiFi() {
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
   WiFi.setHostname(HOSTNAME);
-  WiFi.setAutoReconnect(true);
+  // Disabled so our maintainWiFi() is the sole reconnect driver.
+  // setAutoReconnect(true) + manual WiFi.reconnect() = two concurrent
+  // connect attempts → "sta is connecting, return error" spam.
+  WiFi.setAutoReconnect(false);
 
   Serial.print("[WiFi] Connecting to ");
   Serial.println(WIFI_SSID);
@@ -75,7 +80,8 @@ void beginWiFi() {
 
 void maintainWiFi() {
   if (WiFi.status() == WL_CONNECTED) {
-    wifiState = WIFI_CONNECTED;
+    wifiState             = WIFI_CONNECTED;
+    wifiReconnectAttempts = 0;
     return;
   }
 
@@ -86,7 +92,24 @@ void maintainWiFi() {
 
   lastReconnectAttempt = now;
   wifiState            = WIFI_CONNECTING;
+  wifiReconnectAttempts++;
 
-  Serial.println("[WiFi] Reconnecting...");
-  WiFi.reconnect();
+  if (wifiReconnectAttempts >= WIFI_RECONNECT_MAX_ATTEMPTS) {
+    // WiFi.reconnect() can get permanently stuck after long uptimes.
+    // Full stack reset: turn off the radio, pause, then re-init.
+    Serial.print("[WiFi] Attempt ");
+    Serial.print(wifiReconnectAttempts);
+    Serial.println(" — full stack reset");
+    wifiReconnectAttempts = 0;
+    WiFi.disconnect(true);
+    delay(500);
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  } else {
+    Serial.print("[WiFi] Reconnecting (attempt ");
+    Serial.print(wifiReconnectAttempts);
+    Serial.print("/");
+    Serial.print(WIFI_RECONNECT_MAX_ATTEMPTS);
+    Serial.println(")...");
+    WiFi.reconnect();
+  }
 }

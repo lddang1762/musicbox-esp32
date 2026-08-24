@@ -236,6 +236,7 @@ void loop() {
 
   maintainWiFi();
   ws.cleanupClients();
+  updatePowerTransition(now);
   updateButtons(now);
   updateFilenameScroll(now);
   updateProgress(now);

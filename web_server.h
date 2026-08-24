@@ -52,6 +52,8 @@ String buildStatusJson() {
   json += String(songIndex);
   json += ",\"wifi\":";
   json += WiFi.status() == WL_CONNECTED ? "true" : "false";
+  json += ",\"transitioning\":";
+  json += (pendingPowerTransition != PWR_IDLE) ? "true" : "false";
   json += "}";
 
   return json;
@@ -227,11 +229,17 @@ void handleStatus(AsyncWebServerRequest* request) {
 
 
 void handlePowerOn(AsyncWebServerRequest* request) {
-  setMusicBoxPower(true);
-  broadcastStatus();
+  // Start the 2-second OLED transition; setMusicBoxPower() fires from
+  // updatePowerTransition() in the main loop when the timer expires.
+  // Respond immediately with full status (including transitioning:true) so
+  // the webapp can hold its "powering-on" state until the WS broadcast arrives.
+  if (!musicBoxPower && pendingPowerTransition == PWR_IDLE) {
+    pendingPowerTransition = PWR_TURNING_ON;
+    drawPowerTransition("Powering on...");
+  }
 
   AsyncWebServerResponse* response =
-    request->beginResponse(200, "application/json", "{\"powerOn\":true}");
+    request->beginResponse(200, "application/json", buildStatusJson());
 
   response->addHeader("Cache-Control", "no-store");
   request->send(response);
@@ -239,11 +247,13 @@ void handlePowerOn(AsyncWebServerRequest* request) {
 
 
 void handlePowerOff(AsyncWebServerRequest* request) {
-  setMusicBoxPower(false);
-  broadcastStatus();
+  if (musicBoxPower && pendingPowerTransition == PWR_IDLE) {
+    pendingPowerTransition = PWR_TURNING_OFF;
+    drawPowerTransition("Powering off...");
+  }
 
   AsyncWebServerResponse* response =
-    request->beginResponse(200, "application/json", "{\"powerOn\":false}");
+    request->beginResponse(200, "application/json", buildStatusJson());
 
   response->addHeader("Cache-Control", "no-store");
   request->send(response);
@@ -257,6 +267,7 @@ void handleSelect(AsyncWebServerRequest* request) {
     isPlaying        = true;
     progress         = 0.0f;
     lastProgressTime = millis();
+    displayMode      = DISPLAY_NOW_PLAYING;
     calculateFilenameWidth();
     resetFilenameScroll();
   }
@@ -279,6 +290,7 @@ void handlePlay(AsyncWebServerRequest* request) {
   if (hasSong) {
     isPlaying        = true;
     lastProgressTime = millis();
+    displayMode      = DISPLAY_NOW_PLAYING;
   }
 
   broadcastStatus();
@@ -304,11 +316,13 @@ void handlePause(AsyncWebServerRequest* request) {
 
 
 void handleStop(AsyncWebServerRequest* request) {
-  isPlaying = false;
-  hasSong   = false;
-  songIndex = -1;
-  filename  = "";
-  progress  = 0.0f;
+  selectCursor = (songIndex >= 0) ? songIndex : 0;
+  isPlaying    = false;
+  hasSong      = false;
+  songIndex    = -1;
+  filename     = "";
+  progress     = 0.0f;
+  displayMode  = DISPLAY_SONG_SELECT;
   resetFilenameScroll();
   broadcastStatus();
 
@@ -321,44 +335,24 @@ void handleStop(AsyncWebServerRequest* request) {
 
 
 void handleSongs(AsyncWebServerRequest* request) {
+  // Use the in-memory songList built at boot rather than re-scanning the SD
+  // card here. The async TCP task runs on core 0 while SD was initialized on
+  // core 1; accessing SD across cores without locking causes silent failures.
+  // The song list doesn't change at runtime so the cached list is always current.
   String json;
-  json.reserve(1024);
+  json.reserve(512 + songList.size() * 32);
   json += "{\"songs\":[";
 
-  bool first = true;
-
-  if (sdReady) {
-    File dir = SD.open("/MUSIC");
-
-    if (dir) {
-      while (true) {
-        File entry = dir.openNextFile();
-        if (!entry) break;
-
-        if (!entry.isDirectory()) {
-          String name      = entry.name();
-          String nameLower = name;
-          nameLower.toLowerCase();
-
-          if (!name.startsWith("._") &&
-              (nameLower.endsWith(".mid") || nameLower.endsWith(".midi"))) {
-            if (!first) json += ",";
-            json += "\"";
-            for (size_t i = 0; i < name.length(); i++) {
-              char c = name[i];
-              if (c == '"' || c == '\\') json += '\\';
-              json += c;
-            }
-            json += "\"";
-            first = false;
-          }
-        }
-
-        entry.close();
-      }
-
-      dir.close();
+  for (size_t i = 0; i < songList.size(); i++) {
+    if (i > 0) json += ",";
+    json += "\"";
+    const String& name = songList[i];
+    for (size_t j = 0; j < name.length(); j++) {
+      char c = name[j];
+      if (c == '"' || c == '\\') json += '\\';
+      json += c;
     }
+    json += "\"";
   }
 
   json += "]}";
