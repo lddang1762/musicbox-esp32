@@ -53,6 +53,26 @@ const char* HOSTNAME      = "musicbox";
 
 
 // ============================================================
+// SERVO (PCA9685 -> continuous-rotation SG90)
+// ============================================================
+
+// Shares the OLED's I2C bus (SDA 21 / SCL 22).
+
+#define PCA9685_ADDRESS  0x40
+#define PCA9685_OSC_FREQ 27000000
+
+#define SERVO_CHANNEL 0
+#define SERVO_FREQ    50
+
+// Calibrated in servo_test.ino:
+//   SERVO_STOP  = pulse where the continuous servo sits still
+//   SERVO_SPEED = pulse for rotation while a song is playing
+
+#define SERVO_STOP  300
+#define SERVO_SPEED 320
+
+
+// ============================================================
 // TIMING
 // ============================================================
 

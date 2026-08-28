@@ -25,6 +25,14 @@
   - API endpoints take priority over static files
   - OLED refresh is throttled
   - OLED remains completely OFF while power is OFF
+  - Continuous-rotation servo spins while a song is playing
+
+  SERVO:
+
+  - Continuous-rotation SG90 on a PCA9685 (I2C 0x40)
+  - Shares the OLED I2C bus: SDA 21 / SCL 22
+  - Channel 0
+  - Spins while isPlaying is true, stops on pause / stop / power-off
 
   SD CARD:
 
@@ -78,6 +86,7 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <Adafruit_PWMServoDriver.h>
 #include <WiFi.h>
 #include <ESPmDNS.h>
 #include <LittleFS.h>
@@ -98,6 +107,7 @@
 #include "sd_card.h"
 #include "web_server.h"
 #include "buttons.h"
+#include "servo.h"
 
 
 // ============================================================
@@ -150,6 +160,15 @@ void setup() {
     oledInitialized = false;
     Serial.println("[OLED] Initialization failed");
   }
+
+
+  // ==========================================================
+  // SERVO
+  // ==========================================================
+
+  // After Wire.begin() above — the PCA9685 shares the OLED's I2C bus.
+
+  setupServo();
 
 
   // ==========================================================
@@ -240,6 +259,7 @@ void loop() {
   updateButtons(now);
   updateFilenameScroll(now);
   updateProgress(now);
+  updateServo(now);
 
   if (oledEnabled && now - lastDisplayTime >= DISPLAY_INTERVAL_MS) {
     lastDisplayTime = now;
