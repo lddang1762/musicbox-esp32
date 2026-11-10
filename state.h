@@ -1,6 +1,8 @@
 #pragma once
 
 #include <vector>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include <Adafruit_SSD1306.h>
 #include <ESPAsyncWebServer.h>
 
@@ -131,3 +133,38 @@ bool sdReady = false;
 // ============================================================
 
 std::vector<String> songList;
+
+
+// ============================================================
+// SONG IDS
+// ============================================================
+
+// Parallel to songList: FNV-1a hash of each filename. Stable across SD
+// reordering, so saved playlists reference these instead of indexes.
+
+std::vector<uint32_t> songIds;
+
+
+// ============================================================
+// QUEUE
+// ============================================================
+
+// Upcoming songs (indexes into songList). The current song is songIndex and
+// is NOT in the queue. HTTP handlers (core 0) and the main loop (core 1) both
+// touch these vectors, so always hold queueMux — see QueueLock in player.h.
+
+std::vector<int>  songQueue;
+std::vector<int>  playHistory;      // most recent last
+SemaphoreHandle_t queueMux = nullptr;
+
+
+// ============================================================
+// PENDING COMMANDS (HTTP task -> main loop)
+// ============================================================
+
+// HTTP handlers only record intent here; updatePlayback() in the main loop
+// applies it, so display / I2C work stays on core 1.
+
+volatile int  pendingSelect = -1;   // song index to start, or -1
+volatile int  pendingNav    = 0;    // +1 next, -1 prev, 0 none
+volatile bool songEnded     = false;

@@ -3,6 +3,7 @@
 #include "config.h"
 #include "state.h"
 #include "oled.h"
+#include "player.h"
 
 // Defined in web_server.h — broadcast current state to all WS clients.
 // Forward-declared here to avoid a circular include (web_server.h → oled.h).
@@ -32,24 +33,6 @@ static Button buttons[] = {
 };
 
 static const int BTN_COUNT = sizeof(buttons) / sizeof(buttons[0]);
-
-
-// ============================================================
-// INTERNAL HELPERS
-// ============================================================
-
-static void selectSong(int index) {
-  if (songList.empty()) return;
-
-  songIndex        = index;
-  filename         = songList[index];
-  hasSong          = true;
-  isPlaying        = true;
-  progress         = 0.0f;
-  lastProgressTime = millis();
-  calculateFilenameWidth();
-  resetFilenameScroll();
-}
 
 
 // ============================================================
@@ -85,8 +68,7 @@ void pressPlayPause() {
   if (displayMode == DISPLAY_SONG_SELECT) {
     // Play the currently highlighted song and switch to now-playing view.
     if (songList.empty()) return;
-    selectSong(selectCursor);
-    displayMode = DISPLAY_NOW_PLAYING;
+    playSongIndex(selectCursor);
     broadcastStatus();
     return;
   }
@@ -135,8 +117,7 @@ void pressNext() {
 
   // DISPLAY_NOW_PLAYING: skip to next song.
   if (songList.empty()) return;
-  int next = (songIndex < 0) ? 0 : (songIndex + 1) % (int)songList.size();
-  selectSong(next);
+  advanceNext();
   broadcastStatus();
 }
 
@@ -153,8 +134,7 @@ void pressPrev() {
 
   // DISPLAY_NOW_PLAYING: skip to previous song.
   if (songList.empty()) return;
-  int prev = (songIndex <= 0) ? (int)songList.size() - 1 : songIndex - 1;
-  selectSong(prev);
+  advancePrev();
   broadcastStatus();
 }
 

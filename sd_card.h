@@ -134,8 +134,20 @@ void initializeSDCard() {
 }
 
 
+// 32-bit FNV-1a. Gives each song an ID that survives SD reordering.
+static uint32_t fnv1a(const String& s) {
+  uint32_t h = 2166136261UL;
+  for (size_t i = 0; i < s.length(); i++) {
+    h ^= (uint8_t)s[i];
+    h *= 16777619UL;
+  }
+  return h;
+}
+
+
 void loadSongList() {
   songList.clear();
+  songIds.clear();
 
   if (!sdReady) return;
 
@@ -154,6 +166,7 @@ void loadSongList() {
       if (!name.startsWith("._") &&
           (nameLower.endsWith(".mid") || nameLower.endsWith(".midi"))) {
         songList.push_back(name);
+        songIds.push_back(fnv1a(name));
       }
     }
 
@@ -161,6 +174,17 @@ void loadSongList() {
   }
 
   dir.close();
+
+  for (size_t i = 0; i < songIds.size(); i++) {
+    for (size_t j = i + 1; j < songIds.size(); j++) {
+      if (songIds[i] == songIds[j]) {
+        Serial.print("[SD] WARNING: song ID collision: ");
+        Serial.print(songList[i]);
+        Serial.print(" / ");
+        Serial.println(songList[j]);
+      }
+    }
+  }
 
   Serial.print("[SD] Song list loaded: ");
   Serial.print(songList.size());

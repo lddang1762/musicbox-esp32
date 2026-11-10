@@ -26,6 +26,16 @@
   - OLED refresh is throttled
   - OLED remains completely OFF while power is OFF
   - Continuous-rotation servo spins while a song is playing
+  - Wi-Fi status icon in the top-left of the OLED
+
+  OLED:
+
+  - 2.42" SSD1309, 128x64, I2C 0x3C
+  - Shares the I2C bus with the PCA9685: SDA 21 / SCL 22
+  - Driven by Adafruit_SSD1306 (the SSD1309 is command-compatible)
+  - Top status bar: Wi-Fi icon, X'd out when disconnected
+  - Song select shows 6 rows; now-playing uses double-height text
+  - .mid/.midi extensions hidden on the OLED (API keeps the real filename)
 
   SERVO:
 
@@ -33,6 +43,7 @@
   - Shares the OLED I2C bus: SDA 21 / SCL 22
   - Channel 0
   - Spins while isPlaying is true, stops on pause / stop / power-off
+  - Speed/direction tunable at runtime via GET /api/servo?speed=N
 
   SD CARD:
 
@@ -58,6 +69,7 @@
       POST /api/pause
       POST /api/stop
       GET  /api/songs
+      GET  /api/servo?speed=N   (bench tuning; omit speed to read)
 
   Static files:
 
@@ -103,11 +115,12 @@
 #include "config.h"
 #include "state.h"
 #include "oled.h"
+#include "servo.h"
 #include "wifi_manager.h"
 #include "sd_card.h"
 #include "web_server.h"
+#include "player.h"
 #include "buttons.h"
-#include "servo.h"
 
 
 // ============================================================
@@ -140,11 +153,15 @@ void setup() {
   // OLED
   // ==========================================================
 
-  Serial.println("[OLED] Initializing...");
+  Serial.println("[OLED] Initializing... (2.42\" SSD1309 128x64)");
 
   Wire.begin(21, 22);
   Wire.setClock(400000);
 
+  // SSD1306_SWITCHCAPVCC issues the charge-pump enable command, which the
+  // SSD1309 ignores — it takes its panel voltage from the module's own boost
+  // circuit. The rest of the init sequence is identical between the two
+  // controllers, so the Adafruit_SSD1306 128x64 path drives this panel as-is.
   if (display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS)) {
     oledInitialized = true;
     Serial.println("[OLED] Initialized");
@@ -199,8 +216,13 @@ void setup() {
   // SD CARD
   // ==========================================================
 
+  // Not overlapped with WiFi start-up: the SD init comments above warn that
+  // WiFi's current bursts can brown out the card while it is resetting.
+  drawBootMessage("Loading Songs...");
+
   initializeSDCard();
   loadSongList();
+  setupPlayer();
 
 
   // ==========================================================
@@ -225,12 +247,28 @@ void setup() {
   WiFi.onEvent(WiFiEvent);
   beginWiFi();
 
+  // First connection only: wait here so the OLED can say so. Later drops are
+  // handled silently by maintainWiFi() in loop(). On timeout we carry on and
+  // let it keep retrying.
+  drawBootMessage("Connecting to WiFi...");
+  {
+    unsigned long waitStart = millis();
+    while (WiFi.status() != WL_CONNECTED &&
+           millis() - waitStart < WIFI_BOOT_TIMEOUT_MS) {
+      delay(50);
+    }
+  }
+
 
   // ==========================================================
   // WEB SERVER
   // ==========================================================
 
   setupWebServer();
+
+
+  // Boot messages turned the panel on; the box starts powered off.
+  clearBootMessage();
 
 
   // ==========================================================
@@ -257,6 +295,8 @@ void loop() {
   ws.cleanupClients();
   updatePowerTransition(now);
   updateButtons(now);
+  updatePlayback();
+  updatePlaylistSave();
   updateFilenameScroll(now);
   updateProgress(now);
   updateServo(now);

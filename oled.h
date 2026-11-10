@@ -1,5 +1,7 @@
 #pragma once
 
+#include <WiFi.h>
+
 #include "config.h"
 #include "state.h"
 
@@ -8,12 +10,68 @@
 void broadcastStatus();
 
 
+// ============================================================
+// WI-FI ICON BITMAPS
+// ============================================================
+
+// Two arcs over a dot. The disconnected variant appends an X to the right
+// of the arcs rather than overlaying one, which is illegible at this size.
+//
+// Rows are MSB-first, padded to a whole byte.
+
+// 11 x 7
+static const uint8_t WIFI_ICON_ON[] PROGMEM = {
+  0x1F, 0x00,   // ...#####...
+  0x20, 0x80,   // ..#.....#..
+  0x00, 0x00,
+  0x0E, 0x00,   // ....###....
+  0x11, 0x00,   // ...#...#...
+  0x00, 0x00,
+  0x0E, 0x00,   // ....###....
+};
+
+// 17 x 7
+static const uint8_t WIFI_ICON_OFF[] PROGMEM = {
+  0x1F, 0x00, 0x00,   // ...#####.........
+  0x20, 0x88, 0x80,   // ..#.....#...#...#
+  0x00, 0x05, 0x00,   // .............#.#.
+  0x0E, 0x02, 0x00,   // ....###.......#..
+  0x11, 0x05, 0x00,   // ...#...#.....#.#.
+  0x00, 0x08, 0x80,   // ............#...#
+  0x0E, 0x00, 0x00,   // ....###..........
+};
+
+
+// ============================================================
+// DISPLAY NAME
+// ============================================================
+
+// Strips a trailing .mid / .midi for display only. songList and `filename`
+// keep the real filename — /api/songs, /api/select and the web app all still
+// see the extension.
+static String displayName(const String& name) {
+  String lower = name;
+  lower.toLowerCase();
+
+  if (lower.endsWith(".midi")) return name.substring(0, name.length() - 5);
+  if (lower.endsWith(".mid"))  return name.substring(0, name.length() - 4);
+
+  return name;
+}
+
+
 void calculateFilenameWidth() {
   if (!oledInitialized) return;
 
   int16_t  x1, y1;
   uint16_t w, h;
-  display.getTextBounds(filename, 0, 0, &x1, &y1, &w, &h);
+
+  // Measure the same string drawNowPlaying() prints, at the same size —
+  // getTextBounds uses whatever size was last set, so this must not inherit it.
+  display.setTextSize(2);
+  display.getTextBounds(displayName(filename), 0, 0, &x1, &y1, &w, &h);
+  display.setTextSize(1);
+
   textWidth = (int)w;
 }
 
@@ -30,6 +88,40 @@ void resetFilenameScroll() {
 // DRAW HELPERS
 // ============================================================
 
+// Prints text horizontally centered at the given row.
+static void printCentered(const char* text, int y) {
+  int16_t  x1, y1;
+  uint16_t w, h;
+  display.getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
+
+  int x = (SCREEN_WIDTH - (int)w) / 2;
+  if (x < 0) x = 0;
+
+  display.setCursor(x, y);
+  display.print(text);
+}
+
+
+// Wi-Fi indicator in the top-left corner: arcs when associated, arcs plus
+// an X when not. Read from WiFi.status() rather than the wifiState enum so
+// the icon reflects the radio itself, matching what /api/status reports.
+static void drawWifiIcon() {
+  bool connected = (WiFi.status() == WL_CONNECTED);
+
+  if (connected) {
+    display.drawBitmap(0, WIFI_ICON_Y, WIFI_ICON_ON, 11, 7, SSD1306_WHITE);
+  } else {
+    display.drawBitmap(0, WIFI_ICON_Y, WIFI_ICON_OFF, 17, 7, SSD1306_WHITE);
+  }
+}
+
+
+static void drawStatusBar() {
+  drawWifiIcon();
+  display.drawFastHLine(0, DIVIDER_Y, SCREEN_WIDTH, SSD1306_WHITE);
+}
+
+
 // Draws a centered transition message directly on the OLED regardless of
 // oledEnabled. Sets displayMode = DISPLAY_TRANSITIONING so the main loop
 // keeps repainting it (needed for power-off, where the OLED stays on).
@@ -45,55 +137,72 @@ void drawPowerTransition(const char* text) {
   display.setTextColor(SSD1306_WHITE);
   display.setTextWrap(false);
 
-  int16_t  x1, y1;
-  uint16_t w, h;
-  display.getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
-
-  int x = (SCREEN_WIDTH - (int)w) / 2;
-  if (x < 0) x = 0;
-
-  display.setCursor(x, 12);
-  display.print(text);
+  printCentered(text, (SCREEN_HEIGHT - 8) / 2);
   display.display();
 }
 
 
+// Boot-time message (setup() only). Unlike drawPowerTransition it leaves
+// displayMode alone — the loop isn't running yet — and the caller turns the
+// panel back off with oledOff() once startup finishes.
+void drawBootMessage(const char* text) {
+  if (!oledInitialized) return;
+
+  display.ssd1306_command(SSD1306_DISPLAYON);
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextWrap(false);
+
+  printCentered(text, (SCREEN_HEIGHT - 8) / 2);
+  display.display();
+}
+
+
+// Blanks the panel after the boot messages. oledOff() can't be used here: it
+// bails out when oledEnabled is false, which it still is during setup().
+void clearBootMessage() {
+  if (!oledInitialized) return;
+
+  display.clearDisplay();
+  display.display();
+  display.ssd1306_command(SSD1306_DISPLAYOFF);
+}
+
+
 static void drawSongSelect() {
+  display.setTextSize(1);
+
   if (songList.empty()) {
     display.setTextColor(SSD1306_WHITE);
-    display.setCursor(0, 12);
-    display.print("No songs on SD card");
+    printCentered("No songs on SD card", CONTENT_TOP + 16);
     return;
   }
-
-  const int rowH        = 8;
-  const int visibleRows = SCREEN_HEIGHT / rowH;  // 32 / 8 = 4
 
   // Clamp scroll window to keep cursor visible
   if (selectCursor < selectScrollTop)
     selectScrollTop = selectCursor;
-  if (selectCursor >= selectScrollTop + visibleRows)
-    selectScrollTop = selectCursor - visibleRows + 1;
+  if (selectCursor >= selectScrollTop + SELECT_ROWS)
+    selectScrollTop = selectCursor - SELECT_ROWS + 1;
 
-  for (int i = 0; i < visibleRows; i++) {
-    int  idx      = selectScrollTop + i;
+  for (int i = 0; i < SELECT_ROWS; i++) {
+    int idx = selectScrollTop + i;
     if (idx >= (int)songList.size()) break;
 
-    int  y        = i * rowH;
+    int  y        = CONTENT_TOP + i * SELECT_ROW_H;
     bool selected = (idx == selectCursor);
 
     if (selected) {
-      display.fillRect(0, y, SCREEN_WIDTH, rowH, SSD1306_WHITE);
+      display.fillRect(0, y, SCREEN_WIDTH, SELECT_ROW_H, SSD1306_WHITE);
       display.setTextColor(SSD1306_BLACK);
     } else {
       display.setTextColor(SSD1306_WHITE);
     }
 
-    display.setTextSize(1);
     display.setCursor(2, y);
 
     // Max chars with 2 px left pad: (128 - 2) / 6 = 21
-    const String& name = songList[idx];
+    String name = displayName(songList[idx]);
     if ((int)name.length() <= 21) {
       display.print(name);
     } else {
@@ -108,23 +217,25 @@ static void drawNowPlaying() {
   display.setTextColor(SSD1306_WHITE);
 
   if (!hasSong) {
-    display.setCursor(0, 12);
-    display.print("Please select a song");
+    display.setTextSize(1);
+    printCentered("Please select a song", CONTENT_TOP + 16);
     return;
   }
 
-  display.setCursor(scrollX, 0);
-  display.print(filename);
+  // Filename at double size — scrollX is computed against a size-2 textWidth
+  // in calculateFilenameWidth().
+  display.setTextSize(2);
+  display.setCursor(scrollX, NP_TITLE_Y);
+  display.print(displayName(filename));
 
-  display.setCursor(0, 12);
+  display.setTextSize(1);
+  display.setCursor(0, NP_STATUS_Y);
   display.print(isPlaying ? "Playing..." : "Paused");
 
-  const int barX      = 0;
-  const int barY      = 24;
-  const int barWidth  = 128;
-  const int barHeight = 7;
+  const int barX     = 0;
+  const int barWidth = SCREEN_WIDTH;
 
-  display.drawRect(barX, barY, barWidth, barHeight, SSD1306_WHITE);
+  display.drawRect(barX, NP_BAR_Y, barWidth, NP_BAR_H, SSD1306_WHITE);
 
   float safeProgress = progress;
   if (safeProgress < 0.0f) safeProgress = 0.0f;
@@ -132,7 +243,7 @@ static void drawNowPlaying() {
 
   int fillWidth = (int)((barWidth - 2) * safeProgress);
   if (fillWidth > 0) {
-    display.fillRect(barX + 1, barY + 1, fillWidth, barHeight - 2, SSD1306_WHITE);
+    display.fillRect(barX + 1, NP_BAR_Y + 1, fillWidth, NP_BAR_H - 2, SSD1306_WHITE);
   }
 }
 
@@ -151,26 +262,22 @@ void updateDisplay() {
 
   switch (displayMode) {
     case DISPLAY_SONG_SELECT:
+      drawStatusBar();
       drawSongSelect();
       break;
 
     case DISPLAY_NOW_PLAYING:
+      drawStatusBar();
       drawNowPlaying();
       break;
 
-    case DISPLAY_TRANSITIONING: {
+    case DISPLAY_TRANSITIONING:
       // Repaint so the power-off transition isn't overwritten by the loop.
       // (Power-on doesn't reach here because oledEnabled is still false.)
+      // Drawn full-screen without the status bar, matching drawPowerTransition().
       display.setTextColor(SSD1306_WHITE);
-      int16_t  x1, y1;
-      uint16_t w, h;
-      display.getTextBounds(transitionText, 0, 0, &x1, &y1, &w, &h);
-      int x = (SCREEN_WIDTH - (int)w) / 2;
-      if (x < 0) x = 0;
-      display.setCursor(x, 12);
-      display.print(transitionText);
+      printCentered(transitionText, (SCREEN_HEIGHT - 8) / 2);
       break;
-    }
   }
 
   display.display();
@@ -325,5 +432,8 @@ void updateProgress(unsigned long now) {
 
   lastProgressTime = now;
   progress += 0.005f;
-  if (progress >= 1.0f) progress = 0.0f;
+  if (progress >= 1.0f) {
+    progress  = 0.0f;
+    songEnded = true;   // updatePlayback() decides what plays next
+  }
 }
