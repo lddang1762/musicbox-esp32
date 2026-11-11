@@ -71,13 +71,49 @@ const char* HOSTNAME      = "musicbox";
 // BUTTONS
 // ============================================================
 
-#define BTN_PREV       27
-#define BTN_PLAY_PAUSE 26
-#define BTN_NEXT       25
-#define BTN_STOP       33
+// Power keeps its own push button. Prev / Play-Pause / Next / Stop are all
+// handled by the rotary encoder below.
+
 #define BTN_POWER      32
 
 #define BTN_DEBOUNCE_MS 50
+
+
+// ============================================================
+// ROTARY ENCODER (replaces Prev / Play-Pause / Next / Stop)
+// ============================================================
+
+// Wired to the GPIOs the old Prev / Play-Pause / Next buttons used, so those
+// wires can simply move to the encoder. GPIO 33 (old Stop) is now free.
+// (Pins match the actual wiring: switch on GPIO 25, rotation pins on 27 / 26.)
+//
+//   Song select : each click = Prev (left) / Next (right) cursor move
+//   Playback    : turn >= ENC_PLAYBACK_DEGREES = previous / next song
+//   Short press : play / pause (or play the highlighted song)
+//   Hold        : ENC_HOLD_STOP_MS = stop
+
+#define ENC_A   27    // outer rotation pin (CLK)
+#define ENC_B   26    // outer rotation pin (DT)
+#define ENC_SW  25    // push switch, active LOW (INPUT_PULLUP)
+
+// Quadrature transitions per click. 4 for most KY-040 / EC11 encoders;
+// use 2 if one click only registers as half a step.
+#define ENC_COUNTS_PER_DETENT 4
+
+// Clicks per full revolution (printed on the datasheet; 20 is typical for
+// KY-040 / EC11). Playback needs ceil(ENC_PLAYBACK_DEGREES / (360 / this)).
+#define ENC_DETENTS_PER_REV   20
+#define ENC_PLAYBACK_DEGREES  90
+#define ENC_PLAYBACK_DETENTS  ((ENC_PLAYBACK_DEGREES * ENC_DETENTS_PER_REV + 359) / 360)
+
+// Turning that pauses this long starts over, so slow drift during playback
+// doesn't add up to an accidental skip.
+#define ENC_TURN_TIMEOUT_MS   500
+
+#define ENC_HOLD_STOP_MS      1000
+
+// Swap if turning right moves left.
+#define ENC_REVERSE           true    // clockwise = Next with this wiring
 
 
 // ============================================================

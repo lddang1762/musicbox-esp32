@@ -27,6 +27,8 @@
   - OLED remains completely OFF while power is OFF
   - Continuous-rotation servo spins while a song is playing
   - Wi-Fi status icon in the top-left of the OLED
+  - Rotary encoder navigation (turn = prev/next, click = play/pause,
+    hold 2 s = stop) plus a separate Power button
 
   OLED:
 

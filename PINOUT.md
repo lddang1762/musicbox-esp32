@@ -12,11 +12,10 @@ All pin numbers are ESP32 **GPIO numbers** (not board header positions) and matc
 | 19 | SPI MISO | SD module MISO | |
 | 23 | SPI MOSI | SD module MOSI | |
 | 5 | SD chip select | SD module CS / SS | Driven HIGH at boot |
-| 27 | Button: Previous | Button → GND | `INPUT_PULLUP` |
-| 26 | Button: Play / Pause | Button → GND | `INPUT_PULLUP` |
-| 25 | Button: Next | Button → GND | `INPUT_PULLUP` |
-| 33 | Button: Stop | Button → GND | `INPUT_PULLUP` |
-| 32 | Button: Power | Button → GND | `INPUT_PULLUP` |
+| 27 | Encoder rotation pin A | Encoder outer pin | `INPUT_PULLUP`, interrupt-driven |
+| 26 | Encoder rotation pin B | Encoder outer pin | `INPUT_PULLUP`, interrupt-driven |
+| 25 | Encoder push switch | Encoder switch pin (other pin → GND) | `INPUT_PULLUP` |
+| 32 | Button: Power | Push button → GND | `INPUT_PULLUP` |
 | — | `POWER_PIN` | Not used (`-1`) | Set in config.h to switch an external power stage |
 
 GPIOs not listed are unused.
@@ -72,25 +71,57 @@ ESP32 GND    ──┬── OLED GND
 - The card must be FAT-formatted with songs (`.mid` / `.midi`) in a `/MUSIC` folder.
 - Card init needs a solid 3.3 V. If it fails intermittently, add a 10–100 µF capacitor near the module's VCC.
 
-## Buttons
+## Rotary encoder (navigation) and power button
 
-Each button is wired **between its GPIO and GND**. No external resistor is needed: the firmware enables the internal pull-up, so idle reads HIGH and a press reads LOW (50 ms debounce).
+A bare 5-pin push-button rotary encoder (EC11 style, no breakout board) replaces the old Prev, Play/Pause, Next and Stop buttons. The Power button stays.
+
+Pin layout, viewed from the pins' side with the shaft facing away from you:
 
 ```
-GPIO27 ──[Prev]───── GND
-GPIO26 ──[Play]───── GND
-GPIO25 ──[Next]───── GND
-GPIO33 ──[Stop]───── GND
+   Rotation side        Switch side
+   (3 pins in a row)    (2 pins)
+
+   [A]  [C]  [B]        [S1]  [S2]
+        middle
+```
+
+- The **3-pin row** is the rotation sensor. The **middle pin is common (C)**. The two outer pins are A and B.
+- The **2-pin row on the opposite side** is the push switch. Its two pins are interchangeable.
+
+| Encoder pin | ESP32 |
+|-------------|-------|
+| Outer pin A | GPIO 27 |
+| Outer pin B | GPIO 26 |
+| Middle pin C | GND |
+| Switch pin S1 | GPIO 25 |
+| Switch pin S2 | GND |
+
+No resistors, capacitors or 3.3 V are needed. The firmware enables internal pull-ups on GPIO 27, 26 and 25, and the encoder just connects them to GND.
+
+```
+GPIO27 ──── A
+GND    ──── C (middle)
+GPIO26 ──── B
+
+GPIO25 ──── S1
+GND    ──── S2
+
 GPIO32 ──[Power]──── GND
 ```
 
-| Button | Behavior |
-|--------|----------|
-| Prev | Song select: cursor up. Now playing: previous song |
-| Play / Pause | Song select: play highlighted song. Now playing: toggle |
-| Next | Song select: cursor down. Now playing: next song |
-| Stop | Return to song select |
-| Power | Toggle the box on / off (2 s transition) |
+Which outer pin is A and which is B only decides the turn direction. `ENC_REVERSE` is `true` for this wiring, so clockwise is Next. If it ever moves the wrong way, swap the two outer wires or flip `ENC_REVERSE`.
+
+If your encoder's pins don't match the standard layout, check with a multimeter in continuity mode: the two switch pins beep only while the knob is pressed, and the middle rotation pin beeps to each outer pin alternately as you turn the shaft.
+
+| Action | Song select | Playback |
+|--------|-------------|----------|
+| Turn right | Cursor down (Next) | Turn about 90° (5 clicks) = next song |
+| Turn left | Cursor up (Prev) | Turn about 90° (5 clicks) = previous song |
+| Short press | Play highlighted song | Play / pause |
+| Hold 2 s | Nothing | Stop (back to song select) |
+| Power button | Toggle the box on / off (2 s transition) | Same |
+
+Tuning is in the ENCODER section of [config.h](config.h): `ENC_REVERSE`, `ENC_COUNTS_PER_DETENT`, `ENC_DETENTS_PER_REV`, `ENC_PLAYBACK_DEGREES`, `ENC_HOLD_STOP_MS`. GPIO 33 (the old Stop button) is free.
 
 ## Power
 
@@ -140,4 +171,5 @@ GND      ──► AD828 VCC-      GND      ──► PAM8403 5V-
 2. `PCA9685 not found — servo disabled` means check SDA/SCL, VCC and the address (`0x40`).
 3. `[OLED] Initialization failed` means check the address (`0x3C`, some modules use `0x3D`) and the RES pin.
 4. SD failures: check CS (GPIO 5), the `/MUSIC` folder, FAT formatting and the supply voltage.
-5. A button doing nothing: check it goes to GND, not 3.3 V.
+5. Encoder steps backwards: set `ENC_REVERSE` to `true`. One click skips two steps, or needs two clicks to move one: change `ENC_COUNTS_PER_DETENT` between 4 and 2.
+6. A button doing nothing: check it goes to GND, not 3.3 V.

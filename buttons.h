@@ -25,10 +25,6 @@ struct Button {
 // A press drives the pin LOW.
 
 static Button buttons[] = {
-  { BTN_PREV,       HIGH, HIGH, 0 },
-  { BTN_PLAY_PAUSE, HIGH, HIGH, 0 },
-  { BTN_NEXT,       HIGH, HIGH, 0 },
-  { BTN_STOP,       HIGH, HIGH, 0 },
   { BTN_POWER,      HIGH, HIGH, 0 },
 };
 
@@ -140,6 +136,128 @@ void pressPrev() {
 
 
 // ============================================================
+// ROTARY ENCODER
+// ============================================================
+
+// Both pins interrupt on CHANGE and feed a transition table that rejects
+// contact bounce (illegal transitions count 0). Polling from loop() would
+// drop clicks while the SD card or OLED hold the core.
+
+static volatile int8_t  encAccum = 0;
+static volatile uint8_t encState = 0;
+static portMUX_TYPE     encMux   = portMUX_INITIALIZER_UNLOCKED;
+
+void IRAM_ATTR encoderISR() {
+  static const int8_t table[16] = {
+     0, -1,  1,  0,
+     1,  0,  0, -1,
+    -1,  0,  0,  1,
+     0,  1, -1,  0
+  };
+
+  uint8_t ab = (digitalRead(ENC_A) << 1) | digitalRead(ENC_B);
+  encState = ((encState << 2) | ab) & 0x0F;
+
+  portENTER_CRITICAL_ISR(&encMux);
+  encAccum += table[encState];
+  portEXIT_CRITICAL_ISR(&encMux);
+}
+
+
+static int           encPlaySum   = 0;   // net clicks toward a playback skip
+static unsigned long encLastTurn  = 0;
+
+static int           swLastReading = HIGH;
+static int           swStable      = HIGH;
+static unsigned long swDebounceAt  = 0;
+static unsigned long swPressedAt   = 0;
+static bool          swHoldFired   = false;
+static bool          swRotated     = false;   // turned while pressed -> not a click
+
+
+// `clicks` is signed: positive = clockwise = Next.
+static void handleEncoderTurn(int clicks, unsigned long now) {
+  if (swStable == LOW) swRotated = true;
+
+  // Ignore input while the box is off or mid power transition.
+  if (!musicBoxPower || pendingPowerTransition != PWR_IDLE) {
+    encPlaySum = 0;
+    return;
+  }
+
+  if (displayMode == DISPLAY_SONG_SELECT) {
+    encPlaySum = 0;
+    for (int i = 0; i < abs(clicks); i++) {
+      if (clicks > 0) pressNext(); else pressPrev();
+    }
+    return;
+  }
+
+  if (displayMode != DISPLAY_NOW_PLAYING) return;
+
+  // Playback: accumulate net rotation until it reaches the threshold.
+  encPlaySum += clicks;
+  encLastTurn = now;
+
+  if (abs(encPlaySum) >= ENC_PLAYBACK_DETENTS) {
+    bool forward = encPlaySum > 0;
+    encPlaySum   = 0;
+    if (forward) pressNext(); else pressPrev();
+  }
+}
+
+
+static void updateEncoder(unsigned long now) {
+
+  // --- rotation ---
+  int8_t counts, whole;
+  portENTER_CRITICAL(&encMux);
+  counts   = encAccum;
+  whole    = counts / ENC_COUNTS_PER_DETENT;
+  encAccum = counts - whole * ENC_COUNTS_PER_DETENT;
+  portEXIT_CRITICAL(&encMux);
+
+  if (whole != 0) {
+    if (ENC_REVERSE) whole = -whole;
+    handleEncoderTurn(whole, now);
+  }
+
+  if (encPlaySum != 0 && (now - encLastTurn) > ENC_TURN_TIMEOUT_MS) {
+    encPlaySum = 0;
+  }
+
+  // --- push switch: short press = play/pause (on release), hold = stop ---
+  int reading = digitalRead(ENC_SW);
+
+  if (reading != swLastReading) {
+    swDebounceAt  = now;
+    swLastReading = reading;
+  }
+
+  if ((now - swDebounceAt) >= BTN_DEBOUNCE_MS && reading != swStable) {
+    swStable = reading;
+
+    if (swStable == LOW) {
+      swPressedAt = now;
+      swHoldFired = false;
+      swRotated   = false;
+    } else if (!swHoldFired && !swRotated &&
+               pendingPowerTransition == PWR_IDLE) {
+      pressPlayPause();
+    }
+  }
+
+  // Fires while still held, so the user gets feedback at 2 s, and the
+  // release afterwards does nothing.
+  if (swStable == LOW && !swHoldFired && !swRotated &&
+      (now - swPressedAt) >= ENC_HOLD_STOP_MS) {
+    swHoldFired = true;
+    if (pendingPowerTransition == PWR_IDLE) pressStop();
+  }
+}
+
+
+// ============================================================
 // SETUP & POLL
 // ============================================================
 
@@ -147,11 +265,21 @@ void setupButtons() {
   for (int i = 0; i < BTN_COUNT; i++) {
     pinMode(buttons[i].pin, INPUT_PULLUP);
   }
+
+  pinMode(ENC_A,  INPUT_PULLUP);
+  pinMode(ENC_B,  INPUT_PULLUP);
+  pinMode(ENC_SW, INPUT_PULLUP);
+  encState = (digitalRead(ENC_A) << 1) | digitalRead(ENC_B);
+  attachInterrupt(digitalPinToInterrupt(ENC_A), encoderISR, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ENC_B), encoderISR, CHANGE);
+
   Serial.println("[BTN] Buttons initialized");
 }
 
 
 void updateButtons(unsigned long now) {
+  updateEncoder(now);
+
   for (int i = 0; i < BTN_COUNT; i++) {
     Button& b       = buttons[i];
     int     reading = digitalRead(b.pin);
@@ -171,10 +299,6 @@ void updateButtons(unsigned long now) {
     if (reading != LOW) continue;
 
     switch (b.pin) {
-      case BTN_PREV:       pressPrev();      break;
-      case BTN_PLAY_PAUSE: pressPlayPause(); break;
-      case BTN_NEXT:       pressNext();      break;
-      case BTN_STOP:       pressStop();      break;
       case BTN_POWER:      pressPower();     break;
     }
   }

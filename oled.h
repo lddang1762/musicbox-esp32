@@ -85,6 +85,20 @@ void resetFilenameScroll() {
 
 
 // ============================================================
+// FRAME CACHE
+// ============================================================
+
+// updateDisplay() runs every DISPLAY_INTERVAL_MS, but most frames are identical
+// (static song list, paused, no scrolling). Pushing 1 KB over I2C ten times a
+// second makes audible bursts of bus current/noise in the analog audio chain,
+// so a frame is only sent when it differs from what the panel already shows.
+// Anything that writes to the panel directly must set frameCacheValid = false.
+
+static uint8_t lastFrame[SCREEN_WIDTH * SCREEN_HEIGHT / 8];
+static bool    frameCacheValid = false;
+
+
+// ============================================================
 // DRAW HELPERS
 // ============================================================
 
@@ -128,6 +142,8 @@ static void drawStatusBar() {
 void drawPowerTransition(const char* text) {
   if (!oledInitialized) return;
 
+  frameCacheValid = false;
+
   transitionText = text;
   displayMode    = DISPLAY_TRANSITIONING;
 
@@ -147,6 +163,8 @@ void drawPowerTransition(const char* text) {
 // panel back off with oledOff() once startup finishes.
 void drawBootMessage(const char* text) {
   if (!oledInitialized) return;
+
+  frameCacheValid = false;
 
   display.ssd1306_command(SSD1306_DISPLAYON);
   display.clearDisplay();
@@ -280,6 +298,11 @@ void updateDisplay() {
       break;
   }
 
+  uint8_t* frame = display.getBuffer();
+  if (frameCacheValid && memcmp(frame, lastFrame, sizeof(lastFrame)) == 0) return;
+
+  memcpy(lastFrame, frame, sizeof(lastFrame));
+  frameCacheValid = true;
   display.display();
 }
 
@@ -292,7 +315,8 @@ void oledOn() {
   if (!oledInitialized) return;
   if (oledEnabled)      return;
 
-  oledEnabled = true;
+  oledEnabled     = true;
+  frameCacheValid = false;
   display.ssd1306_command(SSD1306_DISPLAYON);
 
   calculateFilenameWidth();
@@ -310,7 +334,8 @@ void oledOff() {
   if (!oledInitialized) return;
   if (!oledEnabled)     return;
 
-  oledEnabled = false;
+  oledEnabled     = false;
+  frameCacheValid = false;
   display.clearDisplay();
   display.display();
   display.ssd1306_command(SSD1306_DISPLAYOFF);
