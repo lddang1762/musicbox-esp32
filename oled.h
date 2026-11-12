@@ -177,6 +177,23 @@ void drawBootMessage(const char* text) {
 }
 
 
+// Up to three centered lines, for the Bluetooth setup instructions.
+void drawBootLines(const char* l1, const char* l2 = nullptr, const char* l3 = nullptr) {
+  if (!oledInitialized) return;
+
+  display.ssd1306_command(SSD1306_DISPLAYON);
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextWrap(false);
+
+  printCentered(l1, 14);
+  if (l2) printCentered(l2, 30);
+  if (l3) printCentered(l3, 42);
+  display.display();
+}
+
+
 // Blanks the panel after the boot messages. oledOff() can't be used here: it
 // bails out when oledEnabled is false, which it still is during setup().
 void clearBootMessage() {

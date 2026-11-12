@@ -247,18 +247,25 @@ void setup() {
   // ==========================================================
 
   WiFi.onEvent(WiFiEvent);
-  beginWiFi();
 
-  // First connection only: wait here so the OLED can say so. Later drops are
-  // handled silently by maintainWiFi() in loop(). On timeout we carry on and
-  // let it keep retrying.
-  drawBootMessage("Connecting to WiFi...");
-  {
+  if (wifiIsProvisioned()) {
+    // Credentials worked before: just connect. Bluetooth is never started.
+    //
+    // First connection only: wait here so the OLED can say so. Later drops are
+    // handled silently by maintainWiFi() in loop(). On timeout we carry on and
+    // let it keep retrying.
+    drawBootMessage("Connecting to WiFi...");
+    beginWiFi();
+
     unsigned long waitStart = millis();
     while (WiFi.status() != WL_CONNECTED &&
            millis() - waitStart < WIFI_BOOT_TIMEOUT_MS) {
       delay(50);
     }
+  } else {
+    // First-ever boot (or after /api/wifi/clear): Bluetooth setup. Blocks
+    // until the box is connected, then releases Bluetooth for good.
+    provisionWiFiOverBle();
   }
 
 
@@ -299,6 +306,7 @@ void loop() {
   updateButtons(now);
   updatePlayback();
   updatePlaylistSave();
+  updateWifiClear();
   updateFilenameScroll(now);
   updateProgress(now);
   updateServo(now);

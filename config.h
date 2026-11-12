@@ -4,9 +4,19 @@
 // WIFI
 // ============================================================
 
-const char* WIFI_SSID     = "Okay";
-const char* WIFI_PASSWORD = "fourwordsallcaps";
-const char* HOSTNAME      = "musicbox";
+// Credentials are NOT stored in the firmware. On first boot the box waits for
+// them over Bluetooth (see provisionWiFiOverBle in wifi_manager.h) and the
+// WiFi stack then keeps them in flash across power cycles.
+const char* HOSTNAME = "musicbox";
+
+// First-boot Bluetooth setup, used with Espressif's "ESP BLE Provisioning" app.
+// The BLE name is BLE_NAME_PREFIX + 4 hex digits of the chip's MAC.
+const char* BLE_NAME_PREFIX = "MUSICBOX_";
+
+// Dev only: enables POST /api/wifi/clear, which forgets the saved WiFi
+// credentials and reboots into Bluetooth setup. Set to 0 for a shipping build —
+// the route is unauthenticated.
+#define ENABLE_WIFI_CLEAR_ROUTE 1
 
 
 // ============================================================

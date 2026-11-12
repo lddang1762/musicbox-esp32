@@ -534,6 +534,16 @@ void handlePlaylistsPost(AsyncWebServerRequest* request) {
 }
 
 
+#if ENABLE_WIFI_CLEAR_ROUTE
+// Dev only. POST so a stray link or prefetch can't trigger it:
+//     curl -X POST http://musicbox.local/api/wifi/clear
+void handleWifiClear(AsyncWebServerRequest* request) {
+  wifiClearRequested = true;
+  sendOk(request);
+}
+#endif
+
+
 void handleTest(AsyncWebServerRequest* request) {
   request->send(200, "text/plain", "Music Box ESP32 server is working!");
 }
@@ -643,6 +653,9 @@ void setupWebServer() {
   server.on("/api/queue",     HTTP_POST, handleQueue);
   server.on("/api/playlists", HTTP_GET,  handlePlaylistsGet);
   server.on("/api/playlists", HTTP_POST, handlePlaylistsPost, nullptr, handlePlaylistsBody);
+#if ENABLE_WIFI_CLEAR_ROUTE
+  server.on("/api/wifi/clear", HTTP_POST, handleWifiClear);
+#endif
   server.on("/api/songs",     HTTP_GET,  handleSongs);
   server.on("/api/test",      HTTP_GET,  handleTest);
   server.on("/api/servo",     HTTP_GET,  handleServo);

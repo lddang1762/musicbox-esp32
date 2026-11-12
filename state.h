@@ -168,3 +168,7 @@ SemaphoreHandle_t queueMux = nullptr;
 volatile int  pendingSelect = -1;   // song index to start, or -1
 volatile int  pendingNav    = 0;    // +1 next, -1 prev, 0 none
 volatile bool songEnded     = false;
+
+// POST /api/wifi/clear sets this; updateWifiClear() in the main loop wipes the
+// saved credentials and reboots.
+volatile bool wifiClearRequested = false;
